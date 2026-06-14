@@ -1,0 +1,8 @@
+sprites_src/
+sprites_src_back/
+sprites/
+build/
+example_build.zip
+palettes.yaml_back
+.DS_Store
+.claude/

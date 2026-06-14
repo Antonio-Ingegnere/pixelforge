@@ -1,0 +1,26 @@
+defaults:
+  palette_size: 16
+  weighting: sqrt
+  bg_key: black
+  bg_luma_thresh: 18
+  force_black: true
+  fit_warn: 0.05
+groups:
+  vehicles:
+    palette_size: 16
+entities:
+- id: FordMustang-1967
+  file: FordMustang-1967-x64.aseprite
+  group: vehicles
+- id: ChevroletElCamino-1968x64
+  file: ChevroletElCamino-1968x64.aseprite
+  group: vehicles
+- id: HondaCivic
+  file: HondaCivic.aseprite
+  group: vehicles
+- id: JeepWrangler2
+  file: JeepWrangler2.aseprite
+  group: vehicles
+- id: PoliceCar
+  file: PoliceCar.aseprite
+  group: vehicles

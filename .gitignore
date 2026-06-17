@@ -6,3 +6,11 @@ example_build.zip
 palettes.yaml_back
 .DS_Store
 .claude/
+
+# nested repo — normalizer original files live at repo root level
+normalizer/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

@@ -1,20 +1,16 @@
 from PySide6.QtCore import QThreadPool
-from PySide6.QtWidgets import QMainWindow, QTabWidget
+from PySide6.QtWidgets import QMainWindow
 
-from ui.forge_tab import ForgeTab
-from ui.normalizer_tab import NormalizerTab
+from ui.catalogue_view import CatalogueView
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PixelForge Studio")
-        self.resize(1200, 820)
+        self.resize(1280, 860)
 
         self._pool = QThreadPool.globalInstance()
         self._pool.setMaxThreadCount(2)
 
-        tabs = QTabWidget()
-        tabs.addTab(ForgeTab(self._pool), "Sprite Forge")
-        tabs.addTab(NormalizerTab(self._pool), "Palette Normalizer")
-        self.setCentralWidget(tabs)
+        self.setCentralWidget(CatalogueView(self._pool))

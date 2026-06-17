@@ -36,6 +36,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+ANCHORS = {
+    "center":        (0.5, 0.5),
+    "top-left":      (0.0, 0.0),
+    "top-center":    (0.5, 0.0),
+    "top-right":     (1.0, 0.0),
+    "middle-left":   (0.0, 0.5),
+    "middle-right":  (1.0, 0.5),
+    "bottom-left":   (0.0, 1.0),
+    "bottom-center": (0.5, 1.0),
+    "bottom-right":  (1.0, 1.0),
+}
+
 from ui.widgets.image_viewer import ImageViewer
 
 
@@ -87,31 +99,76 @@ class SpriteInspector(QWidget):
         pipeline_box = QGroupBox("Pipeline")
         pipeline_layout = QVBoxLayout(pipeline_box)
 
-        # Normalize row
+        # Step 1 — Normalize
         norm_row = QHBoxLayout()
-        self._norm_check = QCheckBox("Normalize (auto pixel-grid detection)")
+        self._norm_check = QCheckBox("1 · Normalize  (auto pixel-grid detection)")
         norm_row.addWidget(self._norm_check)
         norm_row.addStretch()
         pipeline_layout.addLayout(norm_row)
 
-        # Resize row
-        resize_row = QHBoxLayout()
-        self._resize_check = QCheckBox("Resize to")
-        self._resize_w = QSpinBox()
-        self._resize_w.setRange(1, 4096)
-        self._resize_w.setValue(64)
-        self._resize_w.setFixedWidth(64)
-        self._resize_h = QSpinBox()
-        self._resize_h.setRange(1, 4096)
-        self._resize_h.setValue(64)
-        self._resize_h.setFixedWidth(64)
-        resize_row.addWidget(self._resize_check)
-        resize_row.addWidget(QLabel("W:"))
-        resize_row.addWidget(self._resize_w)
-        resize_row.addWidget(QLabel("H:"))
-        resize_row.addWidget(self._resize_h)
-        resize_row.addStretch()
-        pipeline_layout.addLayout(resize_row)
+        # Step 2 — Resize sprite (scale, ratio-aware)
+        scale_row = QHBoxLayout()
+        self._scale_check = QCheckBox("2 · Resize sprite")
+        self._scale_w = QSpinBox()
+        self._scale_w.setRange(0, 4096)
+        self._scale_w.setValue(64)
+        self._scale_w.setFixedWidth(64)
+        self._scale_w.setSpecialValueText("auto")
+        self._scale_h = QSpinBox()
+        self._scale_h.setRange(0, 4096)
+        self._scale_h.setValue(0)
+        self._scale_h.setFixedWidth(64)
+        self._scale_h.setSpecialValueText("auto")
+        scale_row.addWidget(self._scale_check)
+        scale_row.addWidget(QLabel("W:"))
+        scale_row.addWidget(self._scale_w)
+        scale_row.addWidget(QLabel("H:"))
+        scale_row.addWidget(self._scale_h)
+        scale_row.addStretch()
+        pipeline_layout.addLayout(scale_row)
+
+        hint = QLabel("  Set one axis to auto to preserve ratio")
+        hint.setStyleSheet("color: #666; font-size: 10px;")
+        pipeline_layout.addWidget(hint)
+
+        # Step 3 — Resize canvas (pad / crop)
+        canvas_row = QHBoxLayout()
+        self._canvas_check = QCheckBox("3 · Resize canvas")
+        self._canvas_w = QSpinBox()
+        self._canvas_w.setRange(1, 4096)
+        self._canvas_w.setValue(64)
+        self._canvas_w.setFixedWidth(64)
+        self._canvas_h = QSpinBox()
+        self._canvas_h.setRange(1, 4096)
+        self._canvas_h.setValue(64)
+        self._canvas_h.setFixedWidth(64)
+        canvas_row.addWidget(self._canvas_check)
+        canvas_row.addWidget(QLabel("W:"))
+        canvas_row.addWidget(self._canvas_w)
+        canvas_row.addWidget(QLabel("H:"))
+        canvas_row.addWidget(self._canvas_h)
+        canvas_row.addStretch()
+        pipeline_layout.addLayout(canvas_row)
+
+        anchor_row = QHBoxLayout()
+        anchor_row.addSpacing(20)
+        anchor_row.addWidget(QLabel("Anchor:"))
+        self._anchor_combo = QComboBox()
+        for label, value in [
+            ("Center",        "center"),
+            ("Top-Left",      "top-left"),
+            ("Top-Center",    "top-center"),
+            ("Top-Right",     "top-right"),
+            ("Middle-Left",   "middle-left"),
+            ("Middle-Right",  "middle-right"),
+            ("Bottom-Left",   "bottom-left"),
+            ("Bottom-Center", "bottom-center"),
+            ("Bottom-Right",  "bottom-right"),
+        ]:
+            self._anchor_combo.addItem(label, value)
+        anchor_row.addWidget(self._anchor_combo)
+        anchor_row.addStretch()
+        pipeline_layout.addLayout(anchor_row)
 
         self._apply_btn = QPushButton("Apply Pipeline")
         self._apply_btn.clicked.connect(self._on_apply)
@@ -167,23 +224,42 @@ class SpriteInspector(QWidget):
         # Pipeline config
         pipe = sprite.get("pipeline", {})
         norm = pipe.get("normalize", {})
-        resize = pipe.get("resize", {})
+        scale = pipe.get("resize_sprite", {})
+        canvas = pipe.get("resize_canvas", {})
 
         self._norm_check.blockSignals(True)
         self._norm_check.setChecked(norm.get("enabled", False))
         self._norm_check.blockSignals(False)
 
-        self._resize_check.blockSignals(True)
-        self._resize_check.setChecked(resize.get("enabled", False))
-        self._resize_check.blockSignals(False)
+        self._scale_check.blockSignals(True)
+        self._scale_check.setChecked(scale.get("enabled", False))
+        self._scale_check.blockSignals(False)
 
-        self._resize_w.blockSignals(True)
-        self._resize_w.setValue(resize.get("width") or 64)
-        self._resize_w.blockSignals(False)
+        self._scale_w.blockSignals(True)
+        self._scale_w.setValue(scale.get("width", 64))
+        self._scale_w.blockSignals(False)
 
-        self._resize_h.blockSignals(True)
-        self._resize_h.setValue(resize.get("height") or 64)
-        self._resize_h.blockSignals(False)
+        self._scale_h.blockSignals(True)
+        self._scale_h.setValue(scale.get("height", 0))
+        self._scale_h.blockSignals(False)
+
+        self._canvas_check.blockSignals(True)
+        self._canvas_check.setChecked(canvas.get("enabled", False))
+        self._canvas_check.blockSignals(False)
+
+        self._canvas_w.blockSignals(True)
+        self._canvas_w.setValue(canvas.get("width", 64))
+        self._canvas_w.blockSignals(False)
+
+        self._canvas_h.blockSignals(True)
+        self._canvas_h.setValue(canvas.get("height", 64))
+        self._canvas_h.blockSignals(False)
+
+        anchor = canvas.get("anchor", "center")
+        self._anchor_combo.blockSignals(True)
+        aidx = self._anchor_combo.findData(anchor)
+        self._anchor_combo.setCurrentIndex(max(0, aidx))
+        self._anchor_combo.blockSignals(False)
 
         # Group combo
         self._group_combo.blockSignals(True)
@@ -266,10 +342,16 @@ class SpriteInspector(QWidget):
                 "enabled": self._norm_check.isChecked(),
                 "auto": True,
             },
-            "resize": {
-                "enabled": self._resize_check.isChecked(),
-                "width": self._resize_w.value(),
-                "height": self._resize_h.value(),
+            "resize_sprite": {
+                "enabled": self._scale_check.isChecked(),
+                "width": self._scale_w.value(),
+                "height": self._scale_h.value(),
+            },
+            "resize_canvas": {
+                "enabled": self._canvas_check.isChecked(),
+                "width": self._canvas_w.value(),
+                "height": self._canvas_h.value(),
+                "anchor": self._anchor_combo.currentData(),
             },
         }
         self.pipeline_apply_requested.emit(self._sprite["id"], pipeline_cfg)

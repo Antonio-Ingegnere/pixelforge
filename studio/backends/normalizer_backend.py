@@ -229,7 +229,7 @@ def content_of(frame: np.ndarray, bg_key: str, luma_thresh: float) -> np.ndarray
 # ── entity I/O ────────────────────────────────────────────────────────────────
 
 def entity_frames(m: dict, ent: dict):
-    path = os.path.join(m["_input"], ent["file"])
+    path = ent.get("_source_path") or os.path.join(m["_input"], ent["file"])
     tileable = bool(ent.get("tileable", cfg(m, ent.get("group"), "bg_key") == "none"))
     bgk = "none" if tileable else cfg(m, ent.get("group"), "bg_key")
     lt = cfg(m, ent.get("group"), "bg_luma_thresh")

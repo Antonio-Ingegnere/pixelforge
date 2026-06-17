@@ -116,8 +116,9 @@ def add_sprites(project: dict, source_paths: List[Path]) -> List[dict]:
             "group": None,
             "weight": 1.0,
             "pipeline": {
-                "normalize": {"enabled": False, "auto": True},
-                "resize": {"enabled": False, "width": 0, "height": 0},
+                "normalize":     {"enabled": False, "auto": True},
+                "resize_sprite": {"enabled": False, "width": 64, "height": 0},
+                "resize_canvas": {"enabled": False, "width": 64, "height": 64, "anchor": "center"},
             },
         }
         project["sprites"].append(sprite)
@@ -149,8 +150,12 @@ def get_normalized_path(project_dir: str, sprite_id: str) -> Path:
     return Path(project_dir) / "processed" / f"{sprite_id}_normalized.png"
 
 
-def get_resized_path(project_dir: str, sprite_id: str, width: int, height: int) -> Path:
-    return Path(project_dir) / "processed" / f"{sprite_id}_resized_{width}x{height}.png"
+def get_scaled_path(project_dir: str, sprite_id: str, width: int, height: int) -> Path:
+    return Path(project_dir) / "processed" / f"{sprite_id}_scaled_{width}x{height}.png"
+
+
+def get_canvas_path(project_dir: str, sprite_id: str, width: int, height: int) -> Path:
+    return Path(project_dir) / "processed" / f"{sprite_id}_canvas_{width}x{height}.png"
 
 
 def get_original_path(project: dict, sprite: dict) -> Path:
@@ -160,18 +165,55 @@ def get_original_path(project: dict, sprite: dict) -> Path:
 def get_active_file(project: dict, sprite: dict) -> Path:
     """
     Return the most-processed file that exists on disk.
-    Priority: resized > normalized > original.
+    Priority: canvas > scaled > normalized > original.
     """
     d = project["_dir"]
     pipe = sprite.get("pipeline", {})
 
-    resize_cfg = pipe.get("resize", {})
-    if (
-        resize_cfg.get("enabled")
-        and resize_cfg.get("width")
-        and resize_cfg.get("height")
-    ):
-        p = get_resized_path(d, sprite["id"], resize_cfg["width"], resize_cfg["height"])
+    canvas_cfg = pipe.get("resize_canvas", {})
+    if canvas_cfg.get("enabled") and canvas_cfg.get("width") and canvas_cfg.get("height"):
+        p = get_canvas_path(d, sprite["id"], canvas_cfg["width"], canvas_cfg["height"])
+        if p.exists():
+            return p
+
+    scale_cfg = pipe.get("resize_sprite", {})
+    if scale_cfg.get("enabled") and (scale_cfg.get("width") or scale_cfg.get("height")):
+        w = scale_cfg.get("width", 0)
+        h = scale_cfg.get("height", 0)
+        if w and h:
+            p = get_scaled_path(d, sprite["id"], w, h)
+            if p.exists():
+                return p
+
+    norm_cfg = pipe.get("normalize", {})
+    if norm_cfg.get("enabled"):
+        p = get_normalized_path(d, sprite["id"])
+        if p.exists():
+            return p
+
+    return get_original_path(project, sprite)
+
+
+def get_scale_input(project: dict, sprite: dict) -> Path:
+    """Input for the resize_sprite step: normalized file if it exists, else original."""
+    d = project["_dir"]
+    norm_cfg = sprite.get("pipeline", {}).get("normalize", {})
+    if norm_cfg.get("enabled"):
+        p = get_normalized_path(d, sprite["id"])
+        if p.exists():
+            return p
+    return get_original_path(project, sprite)
+
+
+def get_canvas_input(project: dict, sprite: dict) -> Path:
+    """Input for the resize_canvas step: scaled > normalized > original."""
+    d = project["_dir"]
+    pipe = sprite.get("pipeline", {})
+
+    scale_cfg = pipe.get("resize_sprite", {})
+    w, h = scale_cfg.get("width", 0), scale_cfg.get("height", 0)
+    if scale_cfg.get("enabled") and w and h:
+        p = get_scaled_path(d, sprite["id"], w, h)
         if p.exists():
             return p
 
@@ -184,33 +226,24 @@ def get_active_file(project: dict, sprite: dict) -> Path:
     return get_original_path(project, sprite)
 
 
-def get_resize_input(project: dict, sprite: dict) -> Path:
-    """Input for the resize step: normalized file if it exists, else original."""
-    d = project["_dir"]
-    norm_cfg = sprite.get("pipeline", {}).get("normalize", {})
-    if norm_cfg.get("enabled"):
-        p = get_normalized_path(d, sprite["id"])
-        if p.exists():
-            return p
-    return get_original_path(project, sprite)
-
-
 def pipeline_status(project: dict, sprite: dict) -> str:
     """
     Returns the highest pipeline step whose output exists on disk.
-    One of: 'imported', 'normalized', 'resized'.
+    One of: 'imported', 'normalized', 'scaled', 'canvas'.
     """
     d = project["_dir"]
     pipe = sprite.get("pipeline", {})
 
-    resize_cfg = pipe.get("resize", {})
-    if (
-        resize_cfg.get("enabled")
-        and resize_cfg.get("width")
-        and resize_cfg.get("height")
-    ):
-        if get_resized_path(d, sprite["id"], resize_cfg["width"], resize_cfg["height"]).exists():
-            return "resized"
+    canvas_cfg = pipe.get("resize_canvas", {})
+    if canvas_cfg.get("enabled") and canvas_cfg.get("width") and canvas_cfg.get("height"):
+        if get_canvas_path(d, sprite["id"], canvas_cfg["width"], canvas_cfg["height"]).exists():
+            return "canvas"
+
+    scale_cfg = pipe.get("resize_sprite", {})
+    w, h = scale_cfg.get("width", 0), scale_cfg.get("height", 0)
+    if scale_cfg.get("enabled") and w and h:
+        if get_scaled_path(d, sprite["id"], w, h).exists():
+            return "scaled"
 
     if pipe.get("normalize", {}).get("enabled"):
         if get_normalized_path(d, sprite["id"]).exists():
@@ -279,7 +312,8 @@ def make_normalizer_context(project: dict) -> dict:
         entities.append(
             {
                 "id": s["id"],
-                "file": rel,
+                "file": active.name,       # basename only → clean export/sprites/ output
+                "_source_path": str(active),  # absolute path for entity_frames()
                 "group": s.get("group"),
                 "weight": s.get("weight", 1.0),
                 "tileable": s.get("tileable", False),

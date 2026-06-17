@@ -36,9 +36,10 @@ from PySide6.QtWidgets import (
 MIME_SPRITE_IDS = "application/x-pixelforge-sprite-ids"
 THUMB_SIZE = 96
 STATUS_COLORS = {
-    "imported": "#666666",
+    "imported":   "#666666",
     "normalized": "#55aaff",
-    "resized": "#55ffaa",
+    "scaled":     "#ffaa55",
+    "canvas":     "#55ffaa",
 }
 
 
@@ -195,7 +196,8 @@ class SpriteGrid(QWidget):
 
 def _status_badge(status: str) -> str:
     return {
-        "imported": "○ imported",
+        "imported":   "○ imported",
         "normalized": "◉ normalized",
-        "resized": "● resized",
+        "scaled":     "◕ scaled",
+        "canvas":     "● canvas",
     }.get(status, status)

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Rules
+
+- **Never run `git commit` or `git push` without explicit instruction from the user.** Always stop and ask before committing or pushing, even at the end of a task.
+
 ## Project
 
 **pixelforge** — an SNES-style palette pipeline for deterministic, repeatable sprite palette reduction. Converts high-color PNGs to limited palettes (16 colors, RGB555) for use in a retro-style game.

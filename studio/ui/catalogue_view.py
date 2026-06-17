@@ -53,6 +53,7 @@ class CatalogueView(QWidget):
         self._project: Optional[dict] = None
         self._current_group: Optional[str] = None  # None = Inbox
         self._active_workers = 0
+        self._live_workers: set = set()   # prevents GC of in-flight workers
         self._build_ui()
 
     # ── UI construction ───────────────────────────────────────────────────────
@@ -366,23 +367,30 @@ class CatalogueView(QWidget):
         self._active_workers += 1
 
         worker = PipelineWorker(self._project, s)
+        self._live_workers.add(worker)   # keep Python object alive until finished
+
         worker.signals.log.connect(self._log.append)
-        worker.signals.result.connect(lambda r: self._on_pipeline_result(r, sprite_id))
         worker.signals.error.connect(self._log.append_error)
-        worker.signals.finished.connect(self._on_pipeline_done)
+        worker.signals.finished.connect(
+            lambda w=worker, sid=sprite_id: self._on_pipeline_done(w, sid)
+        )
         self._pool.start(worker)
         self._log.append(f"Pipeline running for {sprite_id}…")
 
-    def _on_pipeline_result(self, result: dict, sprite_id: str):
-        if not self._project:
-            return
-        s = pb.get_sprite(self._project, sprite_id)
-        if s:
-            self._grid.refresh_item(self._project, s)
-            self._inspector.refresh_processed(self._project, s)
-
-    def _on_pipeline_done(self):
+    def _on_pipeline_done(self, worker, sprite_id: str):
+        self._live_workers.discard(worker)
         self._active_workers -= 1
+
+        # Refresh view — done here (on finished) so it always runs even if
+        # result signal was dropped due to the worker being GC'd mid-flight.
+        if self._project:
+            s = pb.get_sprite(self._project, sprite_id)
+            if s:
+                self._grid.refresh_item(self._project, s)
+                insp = self._inspector
+                if insp._sprite and insp._sprite.get("id") == sprite_id:
+                    insp.refresh_processed(self._project, s)
+
         if self._active_workers <= 0:
             self._active_workers = 0
             self._inspector.set_running(False)
@@ -417,10 +425,14 @@ class CatalogueView(QWidget):
             self._active_workers -= 1
             return
 
+        self._live_workers.add(worker)   # keep Python object alive until finished
+
         worker.signals.log.connect(self._log.append)
         worker.signals.result.connect(self._on_palette_result)
         worker.signals.error.connect(self._log.append_error)
-        worker.signals.finished.connect(self._on_palette_done)
+        worker.signals.finished.connect(
+            lambda w=worker: self._on_palette_done(w)
+        )
         self._pool.start(worker)
 
     def _on_palette_result(self, payload: dict):
@@ -428,16 +440,20 @@ class CatalogueView(QWidget):
         cmd = payload.get("command", "")
         msg = f"{cmd} finished — {'ok' if rc == 0 else f'exit {rc}'}"
         (self._log.append_ok if rc == 0 else self._log.append)(msg)
-        # Refresh palette swatch
         if self._project and self._current_group:
             colors = pb.load_palette(self._project, self._current_group) or []
             self._swatch.set_palette(colors)
 
-    def _on_palette_done(self):
+    def _on_palette_done(self, worker):
+        self._live_workers.discard(worker)
         self._active_workers -= 1
         if self._active_workers <= 0:
             self._active_workers = 0
             self._set_cmd_buttons_enabled(True)
+            # Refresh swatch in case result signal was dropped
+            if self._project and self._current_group:
+                colors = pb.load_palette(self._project, self._current_group) or []
+                self._swatch.set_palette(colors)
 
     def _set_cmd_buttons_enabled(self, enabled: bool):
         for btn in self._cmd_btns.values():

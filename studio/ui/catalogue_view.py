@@ -86,6 +86,7 @@ class CatalogueView(QWidget):
         self._inspector.pipeline_apply_requested.connect(self._on_pipeline_apply)
         self._inspector.group_changed.connect(self._on_group_changed_for_sprite)
         self._inspector.weight_changed.connect(self._on_weight_changed)
+        self._inspector.remap_override_changed.connect(self._on_remap_override_changed)
 
         main_split.addWidget(self._sidebar)
         main_split.addWidget(self._grid)
@@ -411,6 +412,54 @@ class CatalogueView(QWidget):
             self._inspector.set_running(False)
             self._log.append("Pipeline done.")
 
+    # ── remap override ───────────────────────────────────────────────────────
+
+    def _on_remap_override_changed(self, sprite_id: str, overrides: dict):
+        if not self._project:
+            return
+        s = pb.get_sprite(self._project, sprite_id)
+        if not s:
+            return
+        s.setdefault("pipeline", {}).setdefault("remap_palette", {})["overrides"] = overrides
+        pb.save_project(self._project)
+        # Re-run step 4 immediately so the processed view reflects the change
+        self._run_remap_step(s)
+
+    def _run_remap_step(self, sprite: dict):
+        """Queue a remap-only pipeline run for a single sprite."""
+        self._inspector.set_running(True)
+        self._active_workers += 1
+        worker = PipelineWorker(self._project, sprite, steps=["remap_palette"])
+        self._live_workers.add(worker)
+        worker.signals.log.connect(self._log.append)
+        worker.signals.error.connect(self._log.append_error)
+        worker.signals.finished.connect(
+            lambda w=worker, sid=sprite["id"]: self._on_pipeline_done(w, sid)
+        )
+        self._pool.start(worker)
+
+    def _queue_remap_for_group(self, group_name: str):
+        """Re-run remap step for all sprites in group that have it enabled."""
+        if not self._project or not group_name:
+            return
+        targets = [
+            s for s in pb.sprites_in_group(self._project, group_name)
+            if s.get("pipeline", {}).get("remap_palette", {}).get("enabled")
+        ]
+        if not targets:
+            return
+        self._log.append(f"Auto-remapping {len(targets)} sprite(s) in '{group_name}'…")
+        self._inspector.set_running(True)
+        for s in targets:
+            self._active_workers += 1
+            worker = PipelineWorker(self._project, s, steps=["remap_palette"])
+            self._live_workers.add(worker)
+            worker.signals.error.connect(self._log.append_error)
+            worker.signals.finished.connect(
+                lambda w=worker, sid=s["id"]: self._on_pipeline_done(w, sid)
+            )
+            self._pool.start(worker)
+
     # ── lospec import ────────────────────────────────────────────────────────
 
     def _on_lospec(self):
@@ -428,6 +477,7 @@ class CatalogueView(QWidget):
                 self._log.append_ok(
                     f"Lospec palette applied to '{self._current_group}' ({len(colors)} colors)"
                 )
+                self._queue_remap_for_group(self._current_group)
 
     # ── palette commands ──────────────────────────────────────────────────────
 
@@ -469,13 +519,15 @@ class CatalogueView(QWidget):
         self._pool.start(worker)
 
     def _on_palette_result(self, payload: dict):
-        rc = payload.get("rc", 0)
+        rc  = payload.get("rc", 0)
         cmd = payload.get("command", "")
         msg = f"{cmd} finished — {'ok' if rc == 0 else f'exit {rc}'}"
         (self._log.append_ok if rc == 0 else self._log.append)(msg)
         if self._project and self._current_group:
             colors = pb.load_palette(self._project, self._current_group) or []
             self._swatch.set_palette(colors)
+            if rc == 0 and cmd == "rebalance":
+                self._queue_remap_for_group(self._current_group)
 
     def _on_palette_done(self, worker):
         self._live_workers.discard(worker)

@@ -40,6 +40,7 @@ STATUS_COLORS = {
     "normalized": "#55aaff",
     "scaled":     "#ffaa55",
     "canvas":     "#55ffaa",
+    "remapped":   "#d4892a",
 }
 
 
@@ -202,4 +203,5 @@ def _status_badge(status: str) -> str:
         "normalized": "◉ normalized",
         "scaled":     "◕ scaled",
         "canvas":     "● canvas",
+        "remapped":   "◆ remapped",
     }.get(status, status)

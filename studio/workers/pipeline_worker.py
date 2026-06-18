@@ -21,9 +21,12 @@ from backends.project_backend import (
     get_normalized_path,
     get_scaled_path,
     get_canvas_path,
+    get_remapped_path,
     get_original_path,
     get_scale_input,
     get_canvas_input,
+    get_remap_input,
+    load_palette,
 )
 
 
@@ -129,6 +132,27 @@ class PipelineWorker(QRunnable):
                     outputs["resize_canvas"] = out_path
                     self.signals.log.emit(
                         f"  canvas {cw}×{ch} anchor={anchor} → {out_path.name}"
+                    )
+
+            # ── Step 4: remap to palette ──────────────────────────────────────
+            if should_run("remap_palette"):
+                from backends.remap import remap_image
+                remap_cfg = pipe.get("remap_palette", {})
+                group     = sprite.get("group")
+                palette   = load_palette(project, group) if group else None
+                if not palette:
+                    self.signals.log.emit("  remap skipped — no palette for group")
+                else:
+                    overrides = remap_cfg.get("overrides", {})
+                    src       = get_remap_input(project, sprite)
+                    img       = Image.open(src).convert("RGBA")
+                    result    = remap_image(img, palette, overrides)
+                    out_path  = get_remapped_path(d, sid)
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    result.save(out_path, "PNG")
+                    outputs["remap_palette"] = out_path
+                    self.signals.log.emit(
+                        f"  remapped to palette ({len(palette)} colors) → {out_path.name}"
                     )
 
             self.signals.result.emit({"sprite_id": sid, "outputs": outputs})

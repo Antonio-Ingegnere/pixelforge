@@ -119,6 +119,7 @@ def add_sprites(project: dict, source_paths: List[Path]) -> List[dict]:
                 "normalize":     {"enabled": False, "auto": True},
                 "resize_sprite": {"enabled": False, "width": 64, "height": 0},
                 "resize_canvas": {"enabled": False, "width": 64, "height": 64, "anchor": "center"},
+                "remap_palette": {"enabled": False, "overrides": {}},
             },
         }
         project["sprites"].append(sprite)
@@ -158,6 +159,37 @@ def get_canvas_path(project_dir: str, sprite_id: str, width: int, height: int) -
     return Path(project_dir) / "processed" / f"{sprite_id}_canvas_{width}x{height}.png"
 
 
+def get_remapped_path(project_dir: str, sprite_id: str) -> Path:
+    return Path(project_dir) / "processed" / f"{sprite_id}_remapped.png"
+
+
+def get_remap_input(project: dict, sprite: dict) -> Path:
+    """Highest processed file that exists, excluding the remap output itself."""
+    d    = project["_dir"]
+    pipe = sprite.get("pipeline", {})
+
+    canvas_cfg = pipe.get("resize_canvas", {})
+    if canvas_cfg.get("enabled") and canvas_cfg.get("width") and canvas_cfg.get("height"):
+        p = get_canvas_path(d, sprite["id"], canvas_cfg["width"], canvas_cfg["height"])
+        if p.exists():
+            return p
+
+    scale_cfg = pipe.get("resize_sprite", {})
+    w, h = scale_cfg.get("width", 0), scale_cfg.get("height", 0)
+    if scale_cfg.get("enabled") and w and h:
+        p = get_scaled_path(d, sprite["id"], w, h)
+        if p.exists():
+            return p
+
+    norm_cfg = pipe.get("normalize", {})
+    if norm_cfg.get("enabled"):
+        p = get_normalized_path(d, sprite["id"])
+        if p.exists():
+            return p
+
+    return get_original_path(project, sprite)
+
+
 def get_original_path(project: dict, sprite: dict) -> Path:
     return Path(project["_dir"]) / "sprites" / sprite["file"]
 
@@ -165,10 +197,15 @@ def get_original_path(project: dict, sprite: dict) -> Path:
 def get_active_file(project: dict, sprite: dict) -> Path:
     """
     Return the most-processed file that exists on disk.
-    Priority: canvas > scaled > normalized > original.
+    Priority: remapped > canvas > scaled > normalized > original.
     """
     d = project["_dir"]
     pipe = sprite.get("pipeline", {})
+
+    if pipe.get("remap_palette", {}).get("enabled"):
+        p = get_remapped_path(d, sprite["id"])
+        if p.exists():
+            return p
 
     canvas_cfg = pipe.get("resize_canvas", {})
     if canvas_cfg.get("enabled") and canvas_cfg.get("width") and canvas_cfg.get("height"):
@@ -229,10 +266,14 @@ def get_canvas_input(project: dict, sprite: dict) -> Path:
 def pipeline_status(project: dict, sprite: dict) -> str:
     """
     Returns the highest pipeline step whose output exists on disk.
-    One of: 'imported', 'normalized', 'scaled', 'canvas'.
+    One of: 'imported', 'normalized', 'scaled', 'canvas', 'remapped'.
     """
     d = project["_dir"]
     pipe = sprite.get("pipeline", {})
+
+    if pipe.get("remap_palette", {}).get("enabled"):
+        if get_remapped_path(d, sprite["id"]).exists():
+            return "remapped"
 
     canvas_cfg = pipe.get("resize_canvas", {})
     if canvas_cfg.get("enabled") and canvas_cfg.get("width") and canvas_cfg.get("height"):

@@ -346,6 +346,12 @@ def load_palette(project: dict, group: str) -> Optional[List]:
     return colors or None
 
 
+def save_palette(project: dict, group: str, colors: List):
+    """Write (R, G, B) tuples to group's .hex file."""
+    p = Path(project["_dir"]) / "palettes" / f"{group}.hex"
+    p.write_text("".join(f"{r:02x}{g:02x}{b:02x}\n" for r, g, b in colors))
+
+
 # ── private helpers ───────────────────────────────────────────────────────────
 
 def _make_id(filename: str, existing: set) -> str:

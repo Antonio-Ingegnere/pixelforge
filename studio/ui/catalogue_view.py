@@ -17,6 +17,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -39,6 +40,7 @@ from backends.normalizer_backend import (
 )
 from ui.widgets.group_sidebar import GroupSidebar
 from ui.widgets.log_panel import LogPanel
+from ui.widgets.lospec_dialog import LospecDialog
 from ui.widgets.palette_swatch import PaletteSwatch
 from ui.widgets.sprite_grid import SpriteGrid
 from ui.widgets.sprite_inspector import SpriteInspector
@@ -165,6 +167,11 @@ class CatalogueView(QWidget):
             controls_row.addWidget(btn)
             self._cmd_btns[cmd] = btn
 
+        controls_row.addSpacing(6)
+        self._lospec_btn = QPushButton("Lospec")
+        self._lospec_btn.clicked.connect(self._on_lospec)
+        controls_row.addWidget(self._lospec_btn)
+
         layout.addLayout(controls_row)
 
         self._log = LogPanel()
@@ -215,6 +222,7 @@ class CatalogueView(QWidget):
 
     def _set_project_loaded(self, loaded: bool):
         self._add_sprites_btn.setEnabled(loaded)
+        self._lospec_btn.setEnabled(loaded)
         for btn in self._cmd_btns.values():
             btn.setEnabled(loaded)
         if not loaded:
@@ -403,6 +411,24 @@ class CatalogueView(QWidget):
             self._inspector.set_running(False)
             self._log.append("Pipeline done.")
 
+    # ── lospec import ────────────────────────────────────────────────────────
+
+    def _on_lospec(self):
+        if not self._project:
+            return
+        if not self._current_group:
+            self._log.append("Select a group first.")
+            return
+        dlg = LospecDialog(self._current_group, self._pool, self)
+        if dlg.exec() == QDialog.Accepted:
+            colors = dlg.get_colors()
+            if colors:
+                pb.save_palette(self._project, self._current_group, colors)
+                self._swatch.set_palette(colors)
+                self._log.append_ok(
+                    f"Lospec palette applied to '{self._current_group}' ({len(colors)} colors)"
+                )
+
     # ── palette commands ──────────────────────────────────────────────────────
 
     def _on_palette_command(self, cmd: str):
@@ -465,3 +491,4 @@ class CatalogueView(QWidget):
     def _set_cmd_buttons_enabled(self, enabled: bool):
         for btn in self._cmd_btns.values():
             btn.setEnabled(enabled)
+        self._lospec_btn.setEnabled(enabled)

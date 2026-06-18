@@ -1,13 +1,15 @@
 """
-SpriteInspector — per-sprite detail panel (right column).
+SpriteInspector — pipeline settings panel (right column).
+
+Pure settings: no image previews (those live in the center workspace).
 
 Pipeline steps
-  1  Normalize
-  2  Resize sprite
-  3  Resize canvas
-  4  Remap to palette   ← new: nearest-OKLab colour matching + per-pair overrides
+  Normalize
+  Resize sprite   (params collapse when unchecked)
+  Resize canvas   (params collapse when unchecked)
+  Remap to palette
 
-Mapping section (visible when step 4 is enabled)
+Mapping section (visible when remap is enabled)
   Shows every unique source colour and the palette slot it maps to.
   Click any target swatch to reassign; amber arrow = user override.
   Changes save immediately and auto-re-run the remap step.
@@ -16,15 +18,14 @@ Signals
   pipeline_apply_requested(sprite_id, pipeline_config)
   group_changed(sprite_id, group_name | None)
   weight_changed(sprite_id, float)
+  remap_override_changed(sprite_id, overrides_dict)
 """
 
-import io
 from pathlib import Path
 from typing import List, Optional
 
 from PIL import Image
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -37,12 +38,10 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from ui.widgets.image_viewer import ImageViewer
 from ui.widgets.color_mapping_widget import ColorMappingWidget
 
 ANCHORS = {
@@ -58,24 +57,11 @@ ANCHORS = {
 }
 
 
-def _pil_to_pixmap(path: Path) -> Optional[QPixmap]:
-    try:
-        img = Image.open(path).convert("RGBA")
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        px = QPixmap()
-        px.loadFromData(buf.read())
-        return px
-    except Exception:
-        return None
-
-
 class SpriteInspector(QWidget):
     pipeline_apply_requested = Signal(str, dict)
     group_changed            = Signal(str, object)
     weight_changed           = Signal(str, float)
-    remap_override_changed   = Signal(str, dict)   # (sprite_id, new_overrides)
+    remap_override_changed   = Signal(str, dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -89,22 +75,29 @@ class SpriteInspector(QWidget):
     def _build_ui(self):
         self.setObjectName("InspectorPanel")
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 10, 12, 10)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._title = QLabel("Select a sprite")
+        # ── title strip ───────────────────────────────────────────────────────
+        title_bar = QWidget()
+        title_bar.setObjectName("InspectorTitleBar")
+        tbl = QHBoxLayout(title_bar)
+        tbl.setContentsMargins(14, 10, 14, 10)
+        self._title = QLabel("No selection")
         self._title.setObjectName("InspectorTitle")
-        root.addWidget(self._title)
+        tbl.addWidget(self._title)
+        root.addWidget(title_bar)
 
-        # ── previews ──────────────────────────────────────────────────────────
-        preview_split = QSplitter(Qt.Horizontal)
-        preview_split.setHandleWidth(1)
-        preview_split.setFixedHeight(130)
-        self._original_view  = ImageViewer("Original")
-        self._processed_view = ImageViewer("Processed")
-        preview_split.addWidget(self._original_view)
-        preview_split.addWidget(self._processed_view)
-        root.addWidget(preview_split)
+        # ── scrollable settings body ──────────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(12, 4, 12, 12)
+        body_layout.setSpacing(0)
 
         # ── pipeline ──────────────────────────────────────────────────────────
         pipeline_box = QGroupBox("PIPELINE")
@@ -112,16 +105,18 @@ class SpriteInspector(QWidget):
         pl.setSpacing(6)
         pl.setContentsMargins(0, 8, 0, 4)
 
-        # Step 1 — Normalize
-        self._norm_check = QCheckBox("1 · Normalize")
+        self._norm_check = QCheckBox("Normalize")
         pl.addWidget(self._norm_check)
 
-        # Step 2 — Resize sprite
-        self._scale_check = QCheckBox("2 · Resize sprite")
+        # Resize sprite (collapsible params)
+        self._scale_check = QCheckBox("Resize sprite")
         pl.addWidget(self._scale_check)
 
+        self._scale_params = QWidget()
+        sp = QVBoxLayout(self._scale_params)
+        sp.setContentsMargins(20, 0, 0, 2)
+        sp.setSpacing(4)
         scale_dims = QHBoxLayout()
-        scale_dims.setContentsMargins(20, 0, 0, 0)
         scale_dims.setSpacing(4)
         scale_dims.addWidget(QLabel("W"))
         self._scale_w = QSpinBox()
@@ -138,19 +133,23 @@ class SpriteInspector(QWidget):
         self._scale_h.setSpecialValueText("auto")
         scale_dims.addWidget(self._scale_h)
         scale_dims.addStretch()
-        pl.addLayout(scale_dims)
+        sp.addLayout(scale_dims)
+        hint_scale = QLabel("0 = auto (preserves ratio)")
+        hint_scale.setObjectName("HintLabel")
+        sp.addWidget(hint_scale)
+        self._scale_params.setVisible(False)
+        self._scale_check.toggled.connect(self._scale_params.setVisible)
+        pl.addWidget(self._scale_params)
 
-        hint = QLabel("0 = auto (preserves ratio)")
-        hint.setObjectName("HintLabel")
-        hint.setContentsMargins(20, 0, 0, 0)
-        pl.addWidget(hint)
-
-        # Step 3 — Resize canvas
-        self._canvas_check = QCheckBox("3 · Resize canvas")
+        # Resize canvas (collapsible params)
+        self._canvas_check = QCheckBox("Resize canvas")
         pl.addWidget(self._canvas_check)
 
+        self._canvas_params = QWidget()
+        cp = QVBoxLayout(self._canvas_params)
+        cp.setContentsMargins(20, 0, 0, 2)
+        cp.setSpacing(4)
         canvas_dims = QHBoxLayout()
-        canvas_dims.setContentsMargins(20, 0, 0, 0)
         canvas_dims.setSpacing(4)
         canvas_dims.addWidget(QLabel("W"))
         self._canvas_w = QSpinBox()
@@ -165,15 +164,13 @@ class SpriteInspector(QWidget):
         self._canvas_h.setFixedWidth(58)
         canvas_dims.addWidget(self._canvas_h)
         canvas_dims.addStretch()
-        pl.addLayout(canvas_dims)
-
+        cp.addLayout(canvas_dims)
         anchor_row = QHBoxLayout()
-        anchor_row.setContentsMargins(20, 0, 0, 0)
         anchor_row.setSpacing(4)
         anchor_row.addWidget(QLabel("Anchor"))
         self._anchor_combo = QComboBox()
         self._anchor_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        for label, value in [
+        for label_text, value in [
             ("Center",        "center"),
             ("Top-Left",      "top-left"),
             ("Top-Center",    "top-center"),
@@ -184,23 +181,24 @@ class SpriteInspector(QWidget):
             ("Bottom-Center", "bottom-center"),
             ("Bottom-Right",  "bottom-right"),
         ]:
-            self._anchor_combo.addItem(label, value)
+            self._anchor_combo.addItem(label_text, value)
         anchor_row.addWidget(self._anchor_combo)
-        pl.addLayout(anchor_row)
+        cp.addLayout(anchor_row)
+        self._canvas_params.setVisible(False)
+        self._canvas_check.toggled.connect(self._canvas_params.setVisible)
+        pl.addWidget(self._canvas_params)
 
-        # Step 4 — Remap to palette
-        self._remap_check = QCheckBox("4 · Remap to palette")
+        self._remap_check = QCheckBox("Remap to palette")
         pl.addWidget(self._remap_check)
 
         self._apply_btn = QPushButton("Apply Pipeline")
         self._apply_btn.setObjectName("PrimaryBtn")
         self._apply_btn.clicked.connect(self._on_apply)
-        self._apply_btn.setMinimumHeight(28)
         pl.addWidget(self._apply_btn)
 
-        root.addWidget(pipeline_box)
+        body_layout.addWidget(pipeline_box)
 
-        # ── colour mapping ─────────────────────────────────────────────────────
+        # ── colour mapping ────────────────────────────────────────────────────
         self._mapping_box = QGroupBox("MAPPING")
         ml = QVBoxLayout(self._mapping_box)
         ml.setSpacing(4)
@@ -210,18 +208,18 @@ class SpriteInspector(QWidget):
         self._mapping_hint.setObjectName("HintLabel")
         ml.addWidget(self._mapping_hint)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setMaximumHeight(110)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        map_scroll = QScrollArea()
+        map_scroll.setWidgetResizable(True)
+        map_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        map_scroll.setMaximumHeight(110)
+        map_scroll.setFrameShape(QScrollArea.NoFrame)
         self._color_map = ColorMappingWidget()
         self._color_map.override_changed.connect(self._on_override_changed)
-        scroll.setWidget(self._color_map)
-        ml.addWidget(scroll)
+        map_scroll.setWidget(self._color_map)
+        ml.addWidget(map_scroll)
 
         self._mapping_box.setVisible(False)
-        root.addWidget(self._mapping_box)
+        body_layout.addWidget(self._mapping_box)
 
         # ── properties ────────────────────────────────────────────────────────
         meta_box = QGroupBox("PROPERTIES")
@@ -248,8 +246,11 @@ class SpriteInspector(QWidget):
         self._info_label.setWordWrap(True)
         meta_layout.addRow("File", self._info_label)
 
-        root.addWidget(meta_box)
-        root.addStretch()
+        body_layout.addWidget(meta_box)
+        body_layout.addStretch()
+
+        scroll.setWidget(body)
+        root.addWidget(scroll, stretch=1)
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -264,18 +265,6 @@ class SpriteInspector(QWidget):
         self._title.setObjectName("InspectorTitleActive")
         self._title.style().unpolish(self._title)
         self._title.style().polish(self._title)
-
-        # Previews
-        orig_px = _pil_to_pixmap(get_original_path(project, sprite))
-        if orig_px:
-            self._original_view.set_image(orig_px)
-
-        active = get_active_file(project, sprite)
-        active_px = _pil_to_pixmap(active)
-        if active_px:
-            self._processed_view.set_image(active_px)
-        else:
-            self._processed_view.clear()
 
         # Pipeline config
         pipe   = sprite.get("pipeline", {})
@@ -293,6 +282,9 @@ class SpriteInspector(QWidget):
             widget.blockSignals(True)
             widget.setChecked(val)
             widget.blockSignals(False)
+
+        self._scale_params.setVisible(scale.get("enabled", False))
+        self._canvas_params.setVisible(canvas.get("enabled", False))
 
         for widget, val in [
             (self._scale_w,   scale.get("width",  64)),
@@ -326,6 +318,7 @@ class SpriteInspector(QWidget):
         self._weight_spin.blockSignals(False)
 
         # Info label
+        active = get_active_file(project, sprite)
         status = pipeline_status(project, sprite)
         try:
             orig_img  = Image.open(get_original_path(project, sprite))
@@ -345,13 +338,10 @@ class SpriteInspector(QWidget):
         self._refresh_mapping()
 
     def refresh_processed(self, project: dict, sprite: dict):
+        """Update info label and mapping after a pipeline run."""
         from backends.project_backend import get_active_file, pipeline_status, get_original_path
 
         active = get_active_file(project, sprite)
-        px = _pil_to_pixmap(active)
-        if px:
-            self._processed_view.set_image(px)
-
         status = pipeline_status(project, sprite)
         try:
             orig_img  = Image.open(get_original_path(project, sprite))
@@ -375,8 +365,6 @@ class SpriteInspector(QWidget):
         self._title.setObjectName("InspectorTitle")
         self._title.style().unpolish(self._title)
         self._title.style().polish(self._title)
-        self._original_view.clear()
-        self._processed_view.clear()
         self._info_label.clear()
         self._apply_btn.setEnabled(False)
         self._color_map.clear()

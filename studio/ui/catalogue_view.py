@@ -1,25 +1,29 @@
 """
 CatalogueView — the main project view.
 
-Owns the project dict (single source of truth).
-Wires GroupSidebar ↔ SpriteGrid ↔ SpriteInspector ↔ BottomBar.
-
-Layout:
-  ┌─ GroupSidebar ─┬─ SpriteGrid (top) ──────────┐
-  │  (left panel)  ├─ SpriteInspector (bottom) ───┤
-  │                │                              │
-  └────────────────┴──────────────────────────────┘
-  └─ BottomBar (palette + pipeline commands + log) ┘
+Layout (Lightroom-style):
+  ┌─ TopBar ──────────────────────────────────────────────────────┐
+  ├──────────────┬────────────────────────────────┬───────────────┤
+  │ Left panel   │ Center workspace               │ Right panel   │
+  │ (240px)      │ (fills remaining space)        │ (280px)       │
+  │              │                                │               │
+  │ GroupSidebar │ GroupToolbar (when grp active) │ PIPELINE      │
+  │ ──────────── │ ────────────────────────────── │ MAPPING       │
+  │ SpriteGrid   │ Original  │  Processed         │ PROPERTIES    │
+  │ (filmstrip)  │ (large zoom/pan viewers)       │               │
+  └──────────────┴────────────────────────────────┴───────────────┘
+  └─ StatusBar (28px) + collapsible log ─────────────────────────┘
 """
 
+import io
 from pathlib import Path
 from typing import List, Optional
 
+from PIL import Image
 from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
-    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -39,6 +43,7 @@ from backends.normalizer_backend import (
     cmd_export,
 )
 from ui.widgets.group_sidebar import GroupSidebar
+from ui.widgets.image_viewer import ImageViewer
 from ui.widgets.log_panel import LogPanel
 from ui.widgets.lospec_dialog import LospecDialog
 from ui.widgets.palette_swatch import PaletteSwatch
@@ -53,9 +58,9 @@ class CatalogueView(QWidget):
         super().__init__(parent)
         self._pool = pool
         self._project: Optional[dict] = None
-        self._current_group: Optional[str] = None  # None = Inbox
+        self._current_group: Optional[str] = None
         self._active_workers = 0
-        self._live_workers: set = set()   # prevents GC of in-flight workers
+        self._live_workers: set = set()
         self._build_ui()
 
     # ── UI construction ───────────────────────────────────────────────────────
@@ -67,9 +72,13 @@ class CatalogueView(QWidget):
 
         root.addWidget(self._build_top_bar())
 
-        # ── three-panel layout: Library | Grid | Develop ──────────────────────
+        # ── three-panel layout ────────────────────────────────────────────────
         main_split = QSplitter(Qt.Horizontal)
         main_split.setHandleWidth(1)
+
+        # Left: groups + sprite filmstrip (vertical split)
+        left_split = QSplitter(Qt.Vertical)
+        left_split.setHandleWidth(1)
 
         self._sidebar = GroupSidebar()
         self._sidebar.group_selected.connect(self._on_group_selected)
@@ -80,24 +89,54 @@ class CatalogueView(QWidget):
 
         self._grid = SpriteGrid()
         self._grid.sprite_selected.connect(self._on_sprite_selected)
+        self._grid.sprites_selection_changed.connect(self._on_sprites_selection_changed)
         self._grid.files_dropped.connect(self._on_files_dropped)
 
+        left_split.addWidget(self._sidebar)
+        left_split.addWidget(self._grid)
+        left_split.setSizes([220, 400])
+        left_split.setStretchFactor(0, 0)
+        left_split.setStretchFactor(1, 1)
+
+        # Center: contextual group toolbar + large before/after viewers
+        center = QWidget()
+        center_layout = QVBoxLayout(center)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
+
+        self._group_toolbar = self._build_group_toolbar()
+        center_layout.addWidget(self._group_toolbar)
+
+        viewer_split = QSplitter(Qt.Horizontal)
+        viewer_split.setHandleWidth(1)
+        self._original_view  = ImageViewer("Original")
+        self._processed_view = ImageViewer("Processed")
+        viewer_split.addWidget(self._original_view)
+        viewer_split.addWidget(self._processed_view)
+        center_layout.addWidget(viewer_split, stretch=1)
+
+        # Right: pipeline settings only
         self._inspector = SpriteInspector()
         self._inspector.pipeline_apply_requested.connect(self._on_pipeline_apply)
         self._inspector.group_changed.connect(self._on_group_changed_for_sprite)
         self._inspector.weight_changed.connect(self._on_weight_changed)
         self._inspector.remap_override_changed.connect(self._on_remap_override_changed)
 
-        main_split.addWidget(self._sidebar)
-        main_split.addWidget(self._grid)
+        main_split.addWidget(left_split)
+        main_split.addWidget(center)
         main_split.addWidget(self._inspector)
         main_split.setStretchFactor(0, 0)
         main_split.setStretchFactor(1, 1)
         main_split.setStretchFactor(2, 0)
-        main_split.setSizes([200, 800, 290])
+        main_split.setSizes([240, 800, 280])
 
         root.addWidget(main_split, stretch=1)
-        root.addWidget(self._build_bottom_bar())
+        root.addWidget(self._build_status_bar())
+
+        self._log = LogPanel()
+        self._log.setFixedHeight(80)
+        self._log.setVisible(False)
+        root.addWidget(self._log)
 
         self._set_project_loaded(False)
 
@@ -135,50 +174,70 @@ class CatalogueView(QWidget):
         layout.addWidget(add_btn)
         return w
 
-    def _build_bottom_bar(self) -> QWidget:
+    def _build_group_toolbar(self) -> QWidget:
+        """Contextual toolbar above center: visible only when a named group is selected."""
         w = QWidget()
-        w.setObjectName("BottomBar")
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.setSpacing(6)
+        w.setObjectName("GroupToolbar")
+        w.setFixedHeight(36)
+        layout = QHBoxLayout(w)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(8)
 
-        # palette + commands row
-        controls_row = QHBoxLayout()
-        controls_row.setSpacing(8)
-
-        self._group_label = QLabel("INBOX")
+        self._group_label = QLabel()
         self._group_label.setObjectName("GroupLabel")
-        controls_row.addWidget(self._group_label)
+        layout.addWidget(self._group_label)
 
         self._swatch = PaletteSwatch()
         self._swatch.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        controls_row.addWidget(self._swatch, stretch=1)
+        layout.addWidget(self._swatch, stretch=1)
 
-        controls_row.addSpacing(12)
+        layout.addSpacing(8)
 
         self._cmd_btns = {}
         for label, cmd in [
             ("Rebalance", "rebalance"),
-            ("Build", "build"),
-            ("Verify", "verify"),
-            ("Export", "export"),
+            ("Build",     "build"),
+            ("Verify",    "verify"),
+            ("Export",    "export"),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(lambda _=False, c=cmd: self._on_palette_command(c))
-            controls_row.addWidget(btn)
+            layout.addWidget(btn)
             self._cmd_btns[cmd] = btn
 
-        controls_row.addSpacing(6)
+        layout.addSpacing(4)
         self._lospec_btn = QPushButton("Lospec")
         self._lospec_btn.clicked.connect(self._on_lospec)
-        controls_row.addWidget(self._lospec_btn)
+        layout.addWidget(self._lospec_btn)
 
-        layout.addLayout(controls_row)
-
-        self._log = LogPanel()
-        self._log.setFixedHeight(90)
-        layout.addWidget(self._log)
+        w.setVisible(False)
         return w
+
+    def _build_status_bar(self) -> QWidget:
+        w = QWidget()
+        w.setObjectName("StatusBar")
+        w.setFixedHeight(28)
+        layout = QHBoxLayout(w)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(8)
+
+        self._status_label = QLabel("Ready")
+        self._status_label.setObjectName("StatusLabel")
+        layout.addWidget(self._status_label)
+
+        layout.addStretch()
+
+        self._log_toggle = QPushButton("Log ▾")
+        self._log_toggle.setObjectName("LogToggleBtn")
+        self._log_toggle.setCheckable(True)
+        self._log_toggle.toggled.connect(self._on_log_toggle)
+        layout.addWidget(self._log_toggle)
+
+        return w
+
+    def _on_log_toggle(self, checked: bool):
+        self._log.setVisible(checked)
+        self._log_toggle.setText("Log ▴" if checked else "Log ▾")
 
     # ── project loading ───────────────────────────────────────────────────────
 
@@ -223,15 +282,14 @@ class CatalogueView(QWidget):
 
     def _set_project_loaded(self, loaded: bool):
         self._add_sprites_btn.setEnabled(loaded)
-        self._lospec_btn.setEnabled(loaded)
-        for btn in self._cmd_btns.values():
-            btn.setEnabled(loaded)
         if not loaded:
+            self._group_toolbar.setVisible(False)
             self._sidebar.set_groups([], {})
             self._grid.set_sprites({}, [])
             self._inspector.clear()
-            self._swatch.set_palette([])
-            self._group_label.setText("")
+            self._original_view.clear()
+            self._processed_view.clear()
+            self._status_label.setText("No project")
 
     # ── sidebar refresh ───────────────────────────────────────────────────────
 
@@ -257,12 +315,29 @@ class CatalogueView(QWidget):
 
     def _refresh_palette_bar(self):
         if self._current_group and self._project:
-            self._group_label.setText(f"Group: {self._current_group}")
+            self._group_label.setText(self._current_group)
             colors = pb.load_palette(self._project, self._current_group) or []
             self._swatch.set_palette(colors)
+            self._group_toolbar.setVisible(True)
         else:
-            self._group_label.setText("Inbox")
-            self._swatch.set_palette([])
+            self._group_toolbar.setVisible(False)
+
+    # ── center viewer refresh ─────────────────────────────────────────────────
+
+    def _refresh_viewers(self, sprite: dict):
+        """Update the large center before/after viewers for the given sprite."""
+        from backends.project_backend import get_active_file, get_original_path
+        try:
+            orig = Image.open(get_original_path(self._project, sprite)).convert("RGBA")
+            self._original_view.set_image(ImageViewer.pixmap_from_pil(orig))
+        except Exception:
+            self._original_view.clear()
+        try:
+            active = get_active_file(self._project, sprite)
+            proc = Image.open(active).convert("RGBA")
+            self._processed_view.set_image(ImageViewer.pixmap_from_pil(proc))
+        except Exception:
+            self._processed_view.clear()
 
     # ── sprite adding ─────────────────────────────────────────────────────────
 
@@ -294,6 +369,8 @@ class CatalogueView(QWidget):
     def _on_group_selected(self, group_name):
         self._current_group = group_name
         self._inspector.clear()
+        self._original_view.clear()
+        self._processed_view.clear()
         self._refresh_grid()
 
     def _on_sprites_dropped(self, sprite_ids: list, group_name):
@@ -349,9 +426,14 @@ class CatalogueView(QWidget):
             return
         s = pb.get_sprite(self._project, sprite_id)
         if s:
-            self._inspector.set_sprite(
-                self._project, s, pb.all_groups(self._project)
-            )
+            self._refresh_viewers(s)
+            self._inspector.set_sprite(self._project, s, pb.all_groups(self._project))
+
+    def _on_sprites_selection_changed(self, ids: list):
+        if len(ids) != 1:
+            self._inspector.clear()
+            self._original_view.clear()
+            self._processed_view.clear()
 
     def _on_group_changed_for_sprite(self, sprite_id: str, group_name):
         if not self._project:
@@ -381,9 +463,10 @@ class CatalogueView(QWidget):
 
         self._inspector.set_running(True)
         self._active_workers += 1
+        self._status_label.setText("Processing…")
 
         worker = PipelineWorker(self._project, s)
-        self._live_workers.add(worker)   # keep Python object alive until finished
+        self._live_workers.add(worker)
 
         worker.signals.log.connect(self._log.append)
         worker.signals.error.connect(self._log.append_error)
@@ -397,22 +480,22 @@ class CatalogueView(QWidget):
         self._live_workers.discard(worker)
         self._active_workers -= 1
 
-        # Refresh view — done here (on finished) so it always runs even if
-        # result signal was dropped due to the worker being GC'd mid-flight.
         if self._project:
             s = pb.get_sprite(self._project, sprite_id)
             if s:
                 self._grid.refresh_item(self._project, s)
                 insp = self._inspector
                 if insp._sprite and insp._sprite.get("id") == sprite_id:
+                    self._refresh_viewers(s)
                     insp.refresh_processed(self._project, s)
 
         if self._active_workers <= 0:
             self._active_workers = 0
             self._inspector.set_running(False)
+            self._status_label.setText("Ready")
             self._log.append("Pipeline done.")
 
-    # ── remap override ───────────────────────────────────────────────────────
+    # ── remap override ────────────────────────────────────────────────────────
 
     def _on_remap_override_changed(self, sprite_id: str, overrides: dict):
         if not self._project:
@@ -422,11 +505,9 @@ class CatalogueView(QWidget):
             return
         s.setdefault("pipeline", {}).setdefault("remap_palette", {})["overrides"] = overrides
         pb.save_project(self._project)
-        # Re-run step 4 immediately so the processed view reflects the change
         self._run_remap_step(s)
 
     def _run_remap_step(self, sprite: dict):
-        """Queue a remap-only pipeline run for a single sprite."""
         self._inspector.set_running(True)
         self._active_workers += 1
         worker = PipelineWorker(self._project, sprite, steps=["remap_palette"])
@@ -439,7 +520,6 @@ class CatalogueView(QWidget):
         self._pool.start(worker)
 
     def _queue_remap_for_group(self, group_name: str):
-        """Re-run remap step for all sprites in group that have it enabled."""
         if not self._project or not group_name:
             return
         targets = [
@@ -460,7 +540,7 @@ class CatalogueView(QWidget):
             )
             self._pool.start(worker)
 
-    # ── lospec import ────────────────────────────────────────────────────────
+    # ── lospec import ─────────────────────────────────────────────────────────
 
     def _on_lospec(self):
         if not self._project:
@@ -490,6 +570,7 @@ class CatalogueView(QWidget):
         ctx = pb.make_normalizer_context(self._project)
         self._set_cmd_buttons_enabled(False)
         self._active_workers += 1
+        self._status_label.setText(f"{cmd.capitalize()} running…")
 
         if cmd == "rebalance":
             worker = NormalizerWorker(
@@ -508,7 +589,7 @@ class CatalogueView(QWidget):
             self._active_workers -= 1
             return
 
-        self._live_workers.add(worker)   # keep Python object alive until finished
+        self._live_workers.add(worker)
 
         worker.signals.log.connect(self._log.append)
         worker.signals.result.connect(self._on_palette_result)
@@ -535,7 +616,7 @@ class CatalogueView(QWidget):
         if self._active_workers <= 0:
             self._active_workers = 0
             self._set_cmd_buttons_enabled(True)
-            # Refresh swatch in case result signal was dropped
+            self._status_label.setText("Ready")
             if self._project and self._current_group:
                 colors = pb.load_palette(self._project, self._current_group) or []
                 self._swatch.set_palette(colors)

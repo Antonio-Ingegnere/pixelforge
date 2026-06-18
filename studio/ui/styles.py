@@ -244,6 +244,11 @@ QListWidget#SpriteList::item:hover:!selected {
     border-left: 1px solid #232323;
 }
 
+#InspectorTitleBar {
+    background-color: #161616;
+    border-bottom: 1px solid #1e1e1e;
+}
+
 #InspectorTitle {
     color: #444444;
     font-size: 11px;
@@ -446,19 +451,52 @@ QCheckBox::indicator:unchecked:hover {
     border: none;
 }
 
-/* ── BOTTOM BAR ──────────────────────────────────────────────────────────── */
+/* ── GROUP TOOLBAR ───────────────────────────────────────────────────────── */
 
-#BottomBar {
+#GroupToolbar {
     background-color: #161616;
-    border-top: 1px solid #232323;
+    border-bottom: 1px solid #1e1e1e;
 }
 
 #GroupLabel {
-    color: #555555;
-    font-size: 10px;
+    color: #888888;
+    font-size: 11px;
     font-weight: bold;
     background-color: transparent;
     border: none;
+}
+
+/* ── STATUS BAR ──────────────────────────────────────────────────────────── */
+
+#StatusBar {
+    background-color: #111111;
+    border-top: 1px solid #1a1a1a;
+}
+
+#StatusLabel {
+    color: #3a3a3a;
+    font-size: 10px;
+    background-color: transparent;
+    border: none;
+}
+
+QPushButton#LogToggleBtn {
+    background-color: transparent;
+    border: none;
+    color: #404040;
+    font-size: 10px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0px 8px;
+    border-radius: 0px;
+}
+
+QPushButton#LogToggleBtn:hover {
+    color: #707070;
+}
+
+QPushButton#LogToggleBtn:checked {
+    color: #d4892a;
 }
 
 /* ── LOG ─────────────────────────────────────────────────────────────────── */

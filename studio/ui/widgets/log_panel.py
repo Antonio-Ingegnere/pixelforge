@@ -1,5 +1,5 @@
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout, QWidget
 
 
 class LogPanel(QWidget):
@@ -8,14 +8,11 @@ class LogPanel(QWidget):
         self._edit = QPlainTextEdit()
         self._edit.setReadOnly(True)
         self._edit.setMaximumBlockCount(2000)
-
-        clear_btn = QPushButton("Clear")
-        clear_btn.setFixedWidth(60)
-        clear_btn.clicked.connect(self._edit.clear)
+        self._edit.setPlaceholderText("— ready —")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(clear_btn)
+        layout.setSpacing(0)
         layout.addWidget(self._edit)
 
     def append(self, text: str):
@@ -28,7 +25,7 @@ class LogPanel(QWidget):
         cursor = self._edit.textCursor()
         cursor.movePosition(QTextCursor.End)
         fmt = QTextCharFormat()
-        fmt.setForeground(QColor("#ff6b6b"))
+        fmt.setForeground(QColor("#e05555"))
         cursor.insertText(f"ERROR: {text}\n", fmt)
         self._edit.setTextCursor(cursor)
         self._edit.verticalScrollBar().setValue(
@@ -39,7 +36,7 @@ class LogPanel(QWidget):
         cursor = self._edit.textCursor()
         cursor.movePosition(QTextCursor.End)
         fmt = QTextCharFormat()
-        fmt.setForeground(QColor("#6bffb8"))
+        fmt.setForeground(QColor("#5dbb8e"))
         cursor.insertText(f"{text}\n", fmt)
         self._edit.setTextCursor(cursor)
         self._edit.verticalScrollBar().setValue(

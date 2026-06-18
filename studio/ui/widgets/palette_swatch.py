@@ -11,7 +11,7 @@ class PaletteSwatch(QWidget):
     Click a swatch to copy its hex code to the clipboard.
     """
 
-    SWATCH_H = 36
+    SWATCH_H = 22
 
     def __init__(self, parent=None):
         super().__init__(parent)

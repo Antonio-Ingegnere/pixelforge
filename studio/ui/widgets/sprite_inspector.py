@@ -79,81 +79,92 @@ class SpriteInspector(QWidget):
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
+        self.setObjectName("InspectorPanel")
         root = QVBoxLayout(self)
-        root.setContentsMargins(4, 4, 4, 4)
-        root.setSpacing(6)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(0)
 
-        self._title = QLabel()
-        self._title.setStyleSheet("font-weight: bold; font-size: 13px;")
+        self._title = QLabel("Select a sprite")
+        self._title.setObjectName("InspectorTitle")
         root.addWidget(self._title)
 
         # ── previews ──────────────────────────────────────────────────────────
         preview_splitter = QSplitter(Qt.Horizontal)
+        preview_splitter.setHandleWidth(1)
+        preview_splitter.setFixedHeight(130)
         self._original_view = ImageViewer("Original")
         self._processed_view = ImageViewer("Processed")
         preview_splitter.addWidget(self._original_view)
         preview_splitter.addWidget(self._processed_view)
-        root.addWidget(preview_splitter, stretch=3)
+        root.addWidget(preview_splitter)
 
         # ── pipeline ──────────────────────────────────────────────────────────
-        pipeline_box = QGroupBox("Pipeline")
+        pipeline_box = QGroupBox("PIPELINE")
         pipeline_layout = QVBoxLayout(pipeline_box)
+        pipeline_layout.setSpacing(6)
+        pipeline_layout.setContentsMargins(0, 8, 0, 4)
 
         # Step 1 — Normalize
-        norm_row = QHBoxLayout()
-        self._norm_check = QCheckBox("1 · Normalize  (auto pixel-grid detection)")
-        norm_row.addWidget(self._norm_check)
-        norm_row.addStretch()
-        pipeline_layout.addLayout(norm_row)
+        self._norm_check = QCheckBox("1 · Normalize")
+        pipeline_layout.addWidget(self._norm_check)
 
-        # Step 2 — Resize sprite (scale, ratio-aware)
-        scale_row = QHBoxLayout()
+        # Step 2 — Resize sprite
         self._scale_check = QCheckBox("2 · Resize sprite")
+        pipeline_layout.addWidget(self._scale_check)
+
+        scale_dims = QHBoxLayout()
+        scale_dims.setContentsMargins(20, 0, 0, 0)
+        scale_dims.setSpacing(4)
+        scale_dims.addWidget(QLabel("W"))
         self._scale_w = QSpinBox()
         self._scale_w.setRange(0, 4096)
         self._scale_w.setValue(64)
-        self._scale_w.setFixedWidth(64)
+        self._scale_w.setFixedWidth(58)
         self._scale_w.setSpecialValueText("auto")
+        scale_dims.addWidget(self._scale_w)
+        scale_dims.addWidget(QLabel("H"))
         self._scale_h = QSpinBox()
         self._scale_h.setRange(0, 4096)
         self._scale_h.setValue(0)
-        self._scale_h.setFixedWidth(64)
+        self._scale_h.setFixedWidth(58)
         self._scale_h.setSpecialValueText("auto")
-        scale_row.addWidget(self._scale_check)
-        scale_row.addWidget(QLabel("W:"))
-        scale_row.addWidget(self._scale_w)
-        scale_row.addWidget(QLabel("H:"))
-        scale_row.addWidget(self._scale_h)
-        scale_row.addStretch()
-        pipeline_layout.addLayout(scale_row)
+        scale_dims.addWidget(self._scale_h)
+        scale_dims.addStretch()
+        pipeline_layout.addLayout(scale_dims)
 
-        hint = QLabel("  Set one axis to auto to preserve ratio")
-        hint.setStyleSheet("color: #666; font-size: 10px;")
+        hint = QLabel("0 = auto (preserves ratio)")
+        hint.setObjectName("HintLabel")
+        hint.setContentsMargins(20, 0, 0, 0)
         pipeline_layout.addWidget(hint)
 
-        # Step 3 — Resize canvas (pad / crop)
-        canvas_row = QHBoxLayout()
+        # Step 3 — Resize canvas
         self._canvas_check = QCheckBox("3 · Resize canvas")
+        pipeline_layout.addWidget(self._canvas_check)
+
+        canvas_dims = QHBoxLayout()
+        canvas_dims.setContentsMargins(20, 0, 0, 0)
+        canvas_dims.setSpacing(4)
+        canvas_dims.addWidget(QLabel("W"))
         self._canvas_w = QSpinBox()
         self._canvas_w.setRange(1, 4096)
         self._canvas_w.setValue(64)
-        self._canvas_w.setFixedWidth(64)
+        self._canvas_w.setFixedWidth(58)
+        canvas_dims.addWidget(self._canvas_w)
+        canvas_dims.addWidget(QLabel("H"))
         self._canvas_h = QSpinBox()
         self._canvas_h.setRange(1, 4096)
         self._canvas_h.setValue(64)
-        self._canvas_h.setFixedWidth(64)
-        canvas_row.addWidget(self._canvas_check)
-        canvas_row.addWidget(QLabel("W:"))
-        canvas_row.addWidget(self._canvas_w)
-        canvas_row.addWidget(QLabel("H:"))
-        canvas_row.addWidget(self._canvas_h)
-        canvas_row.addStretch()
-        pipeline_layout.addLayout(canvas_row)
+        self._canvas_h.setFixedWidth(58)
+        canvas_dims.addWidget(self._canvas_h)
+        canvas_dims.addStretch()
+        pipeline_layout.addLayout(canvas_dims)
 
         anchor_row = QHBoxLayout()
-        anchor_row.addSpacing(20)
-        anchor_row.addWidget(QLabel("Anchor:"))
+        anchor_row.setContentsMargins(20, 0, 0, 0)
+        anchor_row.setSpacing(4)
+        anchor_row.addWidget(QLabel("Anchor"))
         self._anchor_combo = QComboBox()
+        self._anchor_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         for label, value in [
             ("Center",        "center"),
             ("Top-Left",      "top-left"),
@@ -167,23 +178,27 @@ class SpriteInspector(QWidget):
         ]:
             self._anchor_combo.addItem(label, value)
         anchor_row.addWidget(self._anchor_combo)
-        anchor_row.addStretch()
         pipeline_layout.addLayout(anchor_row)
 
         self._apply_btn = QPushButton("Apply Pipeline")
+        self._apply_btn.setObjectName("PrimaryBtn")
         self._apply_btn.clicked.connect(self._on_apply)
+        self._apply_btn.setMinimumHeight(28)
         pipeline_layout.addWidget(self._apply_btn)
 
         root.addWidget(pipeline_box)
 
-        # ── metadata ──────────────────────────────────────────────────────────
-        meta_box = QGroupBox("Properties")
+        # ── properties ────────────────────────────────────────────────────────
+        meta_box = QGroupBox("PROPERTIES")
         meta_layout = QFormLayout(meta_box)
+        meta_layout.setContentsMargins(0, 8, 0, 4)
+        meta_layout.setSpacing(6)
+        meta_layout.setLabelAlignment(Qt.AlignRight)
 
         self._group_combo = QComboBox()
         self._group_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._group_combo.currentIndexChanged.connect(self._on_group_changed)
-        meta_layout.addRow("Group:", self._group_combo)
+        meta_layout.addRow("Group", self._group_combo)
 
         self._weight_spin = QDoubleSpinBox()
         self._weight_spin.setRange(0.01, 10.0)
@@ -191,14 +206,15 @@ class SpriteInspector(QWidget):
         self._weight_spin.setValue(1.0)
         self._weight_spin.setDecimals(2)
         self._weight_spin.editingFinished.connect(self._on_weight_changed)
-        meta_layout.addRow("Weight:", self._weight_spin)
+        meta_layout.addRow("Weight", self._weight_spin)
 
         self._info_label = QLabel()
-        self._info_label.setStyleSheet("color: #888; font-size: 11px;")
+        self._info_label.setObjectName("HintLabel")
         self._info_label.setWordWrap(True)
-        meta_layout.addRow("File:", self._info_label)
+        meta_layout.addRow("File", self._info_label)
 
         root.addWidget(meta_box)
+        root.addStretch()
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -208,6 +224,9 @@ class SpriteInspector(QWidget):
         self._sprite = sprite
         self._project = project
         self._title.setText(sprite["id"])
+        self._title.setObjectName("InspectorTitleActive")
+        self._title.style().unpolish(self._title)
+        self._title.style().polish(self._title)
 
         # Previews
         orig_px = _pil_to_pixmap(get_original_path(project, sprite))
@@ -293,7 +312,7 @@ class SpriteInspector(QWidget):
             f"{sprite['file']}  |  {orig_size} → {act_size}  |  {status}"
         )
 
-        self.setEnabled(True)
+        self._apply_btn.setEnabled(True)
 
     def refresh_processed(self, project: dict, sprite: dict):
         """Reload only the processed preview (called after pipeline run)."""
@@ -322,14 +341,17 @@ class SpriteInspector(QWidget):
     def clear(self):
         self._sprite = None
         self._project = None
-        self._title.setText("Select a sprite")
+        self._title.setText("No selection")
+        self._title.setObjectName("InspectorTitle")
+        self._title.style().unpolish(self._title)
+        self._title.style().polish(self._title)
         self._original_view.clear()
         self._processed_view.clear()
         self._info_label.clear()
-        self.setEnabled(False)
+        self._apply_btn.setEnabled(False)
 
     def set_running(self, running: bool):
-        self._apply_btn.setEnabled(not running)
+        self._apply_btn.setEnabled(not running and self._sprite is not None)
         self._apply_btn.setText("Running…" if running else "Apply Pipeline")
 
     # ── slots ─────────────────────────────────────────────────────────────────

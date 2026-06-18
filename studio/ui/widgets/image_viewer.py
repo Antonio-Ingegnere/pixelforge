@@ -54,10 +54,10 @@ class ImageViewer(QWidget):
         super().__init__(parent)
         self._stack = QStackedWidget()
 
-        self._placeholder = QLabel(f"<center><i>{label_text or 'No image'}</i></center>")
+        self._placeholder = QLabel(label_text or "No image")
+        self._placeholder.setObjectName("ViewerPlaceholder")
         self._placeholder.setAlignment(Qt.AlignCenter)
         self._placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._placeholder.setStyleSheet("color: #666; border: 1px dashed #444;")
 
         self._view = _PixmapView()
 
@@ -67,7 +67,8 @@ class ImageViewer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         if label_text:
-            title = QLabel(f"<b>{label_text}</b>")
+            title = QLabel(label_text)
+            title.setObjectName("ViewerTitle")
             title.setAlignment(Qt.AlignCenter)
             layout.addWidget(title)
         layout.addWidget(self._stack)

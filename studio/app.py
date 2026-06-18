@@ -25,23 +25,24 @@ def _run_gui():
     from PySide6.QtGui import QColor, QPalette
     from PySide6.QtWidgets import QApplication
     from ui.main_window import MainWindow
+    from ui.styles import STYLESHEET
 
     app = QApplication(sys.argv)
     app.setApplicationName("PixelForge Studio")
     app.setStyle("Fusion")
 
-    # Dark palette
+    # Base dark palette (covers native widgets not reached by QSS)
     palette = QPalette()
-    dark = QColor(30, 30, 30)
-    mid = QColor(45, 45, 45)
-    light = QColor(210, 210, 210)
-    accent = QColor(100, 160, 240)
+    dark = QColor(28, 28, 28)
+    mid = QColor(38, 38, 38)
+    light = QColor(204, 204, 204)
+    accent = QColor(212, 137, 42)
 
     palette.setColor(QPalette.Window, dark)
     palette.setColor(QPalette.WindowText, light)
-    palette.setColor(QPalette.Base, QColor(22, 22, 22))
+    palette.setColor(QPalette.Base, QColor(17, 17, 17))
     palette.setColor(QPalette.AlternateBase, mid)
-    palette.setColor(QPalette.ToolTipBase, mid)
+    palette.setColor(QPalette.ToolTipBase, QColor(42, 42, 42))
     palette.setColor(QPalette.ToolTipText, light)
     palette.setColor(QPalette.Text, light)
     palette.setColor(QPalette.Button, mid)
@@ -51,6 +52,7 @@ def _run_gui():
     palette.setColor(QPalette.Highlight, accent)
     palette.setColor(QPalette.HighlightedText, QColor(0, 0, 0))
     app.setPalette(palette)
+    app.setStyleSheet(STYLESHEET)
 
     window = MainWindow()
     window.show()

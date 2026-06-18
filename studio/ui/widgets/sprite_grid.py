@@ -76,15 +76,17 @@ class SpriteGrid(QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        self.setObjectName("GridWidget")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(0)
 
         self._header = QLabel()
-        self._header.setStyleSheet("color: #aaa; font-size: 11px;")
+        self._header.setObjectName("GridHeader")
         layout.addWidget(self._header)
 
         self._list = QListWidget()
+        self._list.setObjectName("SpriteList")
         self._list.setViewMode(QListWidget.IconMode)
         self._list.setIconSize(QSize(THUMB_SIZE, THUMB_SIZE))
         self._list.setGridSize(QSize(THUMB_SIZE + 24, THUMB_SIZE + 36))

@@ -63,14 +63,13 @@ class CatalogueView(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── top bar ───────────────────────────────────────────────────────────
         root.addWidget(self._build_top_bar())
 
-        # ── main area ─────────────────────────────────────────────────────────
-        h_split = QSplitter(Qt.Horizontal)
+        # ── three-panel layout: Library | Grid | Develop ──────────────────────
+        main_split = QSplitter(Qt.Horizontal)
+        main_split.setHandleWidth(1)
 
         self._sidebar = GroupSidebar()
-        self._sidebar.setFixedWidth(180)
         self._sidebar.group_selected.connect(self._on_group_selected)
         self._sidebar.sprites_dropped.connect(self._on_sprites_dropped)
         self._sidebar.group_add_requested.connect(self._on_add_group)
@@ -86,65 +85,74 @@ class CatalogueView(QWidget):
         self._inspector.group_changed.connect(self._on_group_changed_for_sprite)
         self._inspector.weight_changed.connect(self._on_weight_changed)
 
-        right_split = QSplitter(Qt.Vertical)
-        right_split.addWidget(self._grid)
-        right_split.addWidget(self._inspector)
-        right_split.setStretchFactor(0, 2)
-        right_split.setStretchFactor(1, 3)
+        main_split.addWidget(self._sidebar)
+        main_split.addWidget(self._grid)
+        main_split.addWidget(self._inspector)
+        main_split.setStretchFactor(0, 0)
+        main_split.setStretchFactor(1, 1)
+        main_split.setStretchFactor(2, 0)
+        main_split.setSizes([200, 800, 290])
 
-        h_split.addWidget(self._sidebar)
-        h_split.addWidget(right_split)
-        h_split.setStretchFactor(0, 0)
-        h_split.setStretchFactor(1, 1)
-
-        root.addWidget(h_split, stretch=1)
-
-        # ── bottom bar ────────────────────────────────────────────────────────
+        root.addWidget(main_split, stretch=1)
         root.addWidget(self._build_bottom_bar())
 
         self._set_project_loaded(False)
 
     def _build_top_bar(self) -> QWidget:
         w = QWidget()
-        w.setFixedHeight(40)
+        w.setObjectName("TopBar")
+        w.setFixedHeight(38)
         layout = QHBoxLayout(w)
-        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setContentsMargins(14, 7, 14, 7)
+        layout.setSpacing(6)
 
-        new_btn = QPushButton("New Project…")
+        title = QLabel("PIXELFORGE")
+        title.setObjectName("AppTitle")
+        layout.addWidget(title)
+
+        sep = QLabel("·")
+        sep.setObjectName("ProjectLabel")
+        layout.addWidget(sep)
+
+        self._project_label = QLabel("No project open")
+        self._project_label.setObjectName("ProjectLabel")
+        self._project_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout.addWidget(self._project_label)
+
+        new_btn = QPushButton("New Project")
         new_btn.clicked.connect(self._on_new_project)
-        open_btn = QPushButton("Open Project…")
+        open_btn = QPushButton("Open Project")
         open_btn.clicked.connect(self._on_open_project)
-        add_btn = QPushButton("+ Add Sprites…")
+        add_btn = QPushButton("+ Add Sprites")
         add_btn.clicked.connect(self._on_add_sprites_dialog)
         self._add_sprites_btn = add_btn
 
-        self._project_label = QLabel("<i>No project open</i>")
-        self._project_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
         layout.addWidget(new_btn)
         layout.addWidget(open_btn)
-        layout.addWidget(self._project_label)
         layout.addWidget(add_btn)
         return w
 
     def _build_bottom_bar(self) -> QWidget:
         w = QWidget()
+        w.setObjectName("BottomBar")
         layout = QVBoxLayout(w)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(6)
 
-        # palette row
-        palette_row = QHBoxLayout()
-        self._group_label = QLabel()
-        self._group_label.setStyleSheet("font-weight: bold;")
+        # palette + commands row
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(8)
+
+        self._group_label = QLabel("INBOX")
+        self._group_label.setObjectName("GroupLabel")
+        controls_row.addWidget(self._group_label)
+
         self._swatch = PaletteSwatch()
         self._swatch.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        palette_row.addWidget(self._group_label)
-        palette_row.addWidget(self._swatch, stretch=1)
-        layout.addLayout(palette_row)
+        controls_row.addWidget(self._swatch, stretch=1)
 
-        # command buttons
-        cmd_row = QHBoxLayout()
+        controls_row.addSpacing(12)
+
         self._cmd_btns = {}
         for label, cmd in [
             ("Rebalance", "rebalance"),
@@ -154,14 +162,13 @@ class CatalogueView(QWidget):
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(lambda _=False, c=cmd: self._on_palette_command(c))
-            cmd_row.addWidget(btn)
+            controls_row.addWidget(btn)
             self._cmd_btns[cmd] = btn
-        cmd_row.addStretch()
-        layout.addLayout(cmd_row)
 
-        # log
+        layout.addLayout(controls_row)
+
         self._log = LogPanel()
-        self._log.setFixedHeight(120)
+        self._log.setFixedHeight(90)
         layout.addWidget(self._log)
         return w
 
@@ -200,7 +207,7 @@ class CatalogueView(QWidget):
 
     def _load_project(self, project: dict):
         self._project = project
-        self._project_label.setText(f"<b>{project['name']}</b>  —  {project['_dir']}")
+        self._project_label.setText(f"{project['name']}   {project['_dir']}")
         self._current_group = None
         self._set_project_loaded(True)
         self._refresh_sidebar()

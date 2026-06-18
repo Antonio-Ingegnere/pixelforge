@@ -43,14 +43,17 @@ class GroupSidebar(QWidget):
         self.setAcceptDrops(True)
 
     def _build_ui(self):
+        self.setObjectName("SidebarWidget")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(0)
 
-        header = QLabel("<b>Groups</b>")
+        header = QLabel("LIBRARY")
+        header.setObjectName("SidebarHeader")
         layout.addWidget(header)
 
         self._list = QListWidget()
+        self._list.setObjectName("SidebarList")
         self._list.setDragDropMode(QAbstractItemView.DropOnly)
         self._list.setAcceptDrops(True)
         self._list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -59,6 +62,7 @@ class GroupSidebar(QWidget):
         layout.addWidget(self._list)
 
         add_btn = QPushButton("+ New Group")
+        add_btn.setObjectName("SidebarAddBtn")
         add_btn.clicked.connect(self.group_add_requested)
         layout.addWidget(add_btn)
 
@@ -72,14 +76,14 @@ class GroupSidebar(QWidget):
 
         # Inbox entry
         inbox_count = sprite_counts.get(INBOX_KEY, 0)
-        inbox_item = QListWidgetItem(f"📥  Inbox  ({inbox_count})")
+        inbox_item = QListWidgetItem(f"Inbox  ({inbox_count})")
         inbox_item.setData(Qt.UserRole, None)
-        inbox_item.setForeground(QColor("#ffcc55") if inbox_count else QColor("#888"))
+        inbox_item.setForeground(QColor("#d4892a") if inbox_count else QColor("#666666"))
         self._list.addItem(inbox_item)
 
         for name in group_names:
             count = sprite_counts.get(name, 0)
-            item = QListWidgetItem(f"  {name}  ({count})")
+            item = QListWidgetItem(f"{name}  ({count})")
             item.setData(Qt.UserRole, name)
             self._list.addItem(item)
 

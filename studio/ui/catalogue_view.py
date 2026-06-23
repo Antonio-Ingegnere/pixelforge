@@ -61,6 +61,8 @@ class CatalogueView(QWidget):
         self._current_group: Optional[str] = None
         self._active_workers = 0
         self._live_workers: set = set()
+        self._processed_pil = None    # current remapped (Lospec or latest)
+        self._rebalanced_pil = None   # snapshot from last fresh remap
         self._build_ui()
 
     # ── UI construction ───────────────────────────────────────────────────────
@@ -109,10 +111,9 @@ class CatalogueView(QWidget):
 
         viewer_split = QSplitter(Qt.Horizontal)
         viewer_split.setHandleWidth(1)
-        self._original_view  = ImageViewer("Original")
-        self._processed_view = ImageViewer("Processed")
+        self._original_view = ImageViewer("Original")
         viewer_split.addWidget(self._original_view)
-        viewer_split.addWidget(self._processed_view)
+        viewer_split.addWidget(self._build_processed_panel())
         center_layout.addWidget(viewer_split, stretch=1)
 
         # Right: pipeline settings only
@@ -121,6 +122,10 @@ class CatalogueView(QWidget):
         self._inspector.group_changed.connect(self._on_group_changed_for_sprite)
         self._inspector.weight_changed.connect(self._on_weight_changed)
         self._inspector.remap_override_changed.connect(self._on_remap_override_changed)
+        self._inspector.source_color_selected.connect(self._on_source_color_selected)
+
+        self._original_view.pixel_clicked.connect(self._on_original_pixel_clicked)
+        self._processed_view.pixel_clicked.connect(self._on_processed_pixel_clicked)
 
         main_split.addWidget(left_split)
         main_split.addWidget(center)
@@ -239,6 +244,51 @@ class CatalogueView(QWidget):
         self._log.setVisible(checked)
         self._log_toggle.setText("Log ▴" if checked else "Log ▾")
 
+    def _build_processed_panel(self) -> QWidget:
+        """Processed viewer wrapped with a header that has a rebalanced compare toggle."""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        header = QWidget()
+        header.setObjectName("GridHeader")
+        header.setFixedHeight(22)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(10, 0, 10, 0)
+        hl.setSpacing(6)
+
+        self._processed_title = QLabel("Processed")
+        self._processed_title.setObjectName("GridHeader")
+        hl.addWidget(self._processed_title)
+        hl.addStretch()
+
+        self._compare_btn = QPushButton("Rebalanced")
+        self._compare_btn.setObjectName("LogToggleBtn")
+        self._compare_btn.setCheckable(True)
+        self._compare_btn.setFixedHeight(18)
+        self._compare_btn.toggled.connect(self._on_compare_toggled)
+        self._compare_btn.setVisible(False)
+        hl.addWidget(self._compare_btn)
+
+        layout.addWidget(header)
+
+        self._processed_view = ImageViewer()
+        layout.addWidget(self._processed_view, stretch=1)
+        return panel
+
+    def _on_compare_toggled(self, checked: bool):
+        if checked:
+            self._processed_title.setText("Rebalanced")
+            self._compare_btn.setText("Processed")
+            if self._rebalanced_pil:
+                self._processed_view.set_pil_image(self._rebalanced_pil)
+        else:
+            self._processed_title.setText("Processed")
+            self._compare_btn.setText("Rebalanced")
+            if self._processed_pil:
+                self._processed_view.set_pil_image(self._processed_pil)
+
     # ── project loading ───────────────────────────────────────────────────────
 
     def _on_new_project(self):
@@ -289,6 +339,9 @@ class CatalogueView(QWidget):
             self._inspector.clear()
             self._original_view.clear()
             self._processed_view.clear()
+            self._processed_pil = None
+            self._rebalanced_pil = None
+            self._compare_btn.setVisible(False)
             self._status_label.setText("No project")
 
     # ── sidebar refresh ───────────────────────────────────────────────────────
@@ -326,18 +379,58 @@ class CatalogueView(QWidget):
 
     def _refresh_viewers(self, sprite: dict):
         """Update the large center before/after viewers for the given sprite."""
-        from backends.project_backend import get_active_file, get_original_path
+        from backends.project_backend import (
+            get_active_file, get_original_path, get_rebalanced_path,
+        )
+
         try:
             orig = Image.open(get_original_path(self._project, sprite)).convert("RGBA")
-            self._original_view.set_image(ImageViewer.pixmap_from_pil(orig))
+            self._original_view.set_pil_image(orig)
         except Exception:
             self._original_view.clear()
+
         try:
             active = get_active_file(self._project, sprite)
-            proc = Image.open(active).convert("RGBA")
-            self._processed_view.set_image(ImageViewer.pixmap_from_pil(proc))
+            self._processed_pil = Image.open(active).convert("RGBA")
         except Exception:
+            self._processed_pil = None
+
+        reb_path = get_rebalanced_path(self._project["_dir"], sprite["id"])
+        try:
+            self._rebalanced_pil = Image.open(reb_path).convert("RGBA") if reb_path.exists() else None
+        except Exception:
+            self._rebalanced_pil = None
+
+        # Reset compare toggle whenever sprite changes
+        self._compare_btn.blockSignals(True)
+        self._compare_btn.setChecked(False)
+        self._compare_btn.blockSignals(False)
+        self._processed_title.setText("Processed")
+        self._compare_btn.setText("Rebalanced")
+        has_compare = self._rebalanced_pil is not None and self._processed_pil is not None
+        self._compare_btn.setVisible(has_compare)
+
+        if self._processed_pil:
+            self._processed_view.set_pil_image(self._processed_pil)
+        else:
             self._processed_view.clear()
+
+    def _on_original_pixel_clicked(self, rgb):
+        """Original viewer click → highlight mapping by source + dim original."""
+        self._inspector.highlight_mapping_color(rgb)
+        self._original_view.set_highlight_color(rgb)
+        self._processed_view.set_highlight_color(None)
+
+    def _on_processed_pixel_clicked(self, rgb):
+        """Processed viewer click → highlight mapping by target + dim processed."""
+        self._inspector.highlight_mapping_target(rgb)
+        self._processed_view.set_highlight_color(rgb)
+        self._original_view.set_highlight_color(None)
+
+    def _on_source_color_selected(self, rgb):
+        """Mapping source swatch clicked → dim original, clear processed."""
+        self._original_view.set_highlight_color(rgb)
+        self._processed_view.set_highlight_color(None)
 
     # ── sprite adding ─────────────────────────────────────────────────────────
 
@@ -426,6 +519,7 @@ class CatalogueView(QWidget):
             return
         s = pb.get_sprite(self._project, sprite_id)
         if s:
+            self._original_view.set_highlight_color(None)
             self._refresh_viewers(s)
             self._inspector.set_sprite(self._project, s, pb.all_groups(self._project))
 
@@ -492,6 +586,7 @@ class CatalogueView(QWidget):
         if self._active_workers <= 0:
             self._active_workers = 0
             self._inspector.set_running(False)
+            self._set_cmd_buttons_enabled(True)
             self._status_label.setText("Ready")
             self._log.append("Pipeline done.")
 
@@ -510,7 +605,11 @@ class CatalogueView(QWidget):
     def _run_remap_step(self, sprite: dict):
         self._inspector.set_running(True)
         self._active_workers += 1
-        worker = PipelineWorker(self._project, sprite, steps=["remap_palette"])
+        worker = PipelineWorker(
+            self._project, sprite,
+            steps=["remap_palette"],
+            remap_from_active=True,
+        )
         self._live_workers.add(worker)
         worker.signals.log.connect(self._log.append)
         worker.signals.error.connect(self._log.append_error)
@@ -519,7 +618,7 @@ class CatalogueView(QWidget):
         )
         self._pool.start(worker)
 
-    def _queue_remap_for_group(self, group_name: str):
+    def _queue_remap_for_group(self, group_name: str, remap_from_active=False):
         if not self._project or not group_name:
             return
         targets = [
@@ -532,7 +631,11 @@ class CatalogueView(QWidget):
         self._inspector.set_running(True)
         for s in targets:
             self._active_workers += 1
-            worker = PipelineWorker(self._project, s, steps=["remap_palette"])
+            worker = PipelineWorker(
+                self._project, s,
+                steps=["remap_palette"],
+                remap_from_active=remap_from_active,
+            )
             self._live_workers.add(worker)
             worker.signals.error.connect(self._log.append_error)
             worker.signals.finished.connect(
@@ -557,7 +660,7 @@ class CatalogueView(QWidget):
                 self._log.append_ok(
                     f"Lospec palette applied to '{self._current_group}' ({len(colors)} colors)"
                 )
-                self._queue_remap_for_group(self._current_group)
+                self._queue_remap_for_group(self._current_group, remap_from_active=True)
 
     # ── palette commands ──────────────────────────────────────────────────────
 

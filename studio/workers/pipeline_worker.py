@@ -22,10 +22,12 @@ from backends.project_backend import (
     get_scaled_path,
     get_canvas_path,
     get_remapped_path,
+    get_rebalanced_path,
     get_original_path,
     get_scale_input,
     get_canvas_input,
     get_remap_input,
+    get_active_file,
     load_palette,
 )
 
@@ -44,12 +46,13 @@ class PipelineWorker(QRunnable):
     to run only specific steps.
     """
 
-    def __init__(self, project: dict, sprite: dict, steps=None):
+    def __init__(self, project: dict, sprite: dict, steps=None, remap_from_active=False):
         super().__init__()
         self.signals = PipelineSignals()
         self._project = project
         self._sprite = sprite
         self._steps = steps
+        self._remap_from_active = remap_from_active
         self.setAutoDelete(True)
 
     def run(self):
@@ -144,7 +147,9 @@ class PipelineWorker(QRunnable):
                     self.signals.log.emit("  remap skipped — no palette for group")
                 else:
                     overrides = remap_cfg.get("overrides", {})
-                    src       = get_remap_input(project, sprite)
+                    src = (get_active_file(project, sprite)
+                           if self._remap_from_active
+                           else get_remap_input(project, sprite))
                     img       = Image.open(src).convert("RGBA")
                     result    = remap_image(img, palette, overrides)
                     out_path  = get_remapped_path(d, sid)
@@ -154,6 +159,11 @@ class PipelineWorker(QRunnable):
                     self.signals.log.emit(
                         f"  remapped to palette ({len(palette)} colors) → {out_path.name}"
                     )
+                    # Fresh remap (not chained): snapshot as the rebalanced reference so
+                    # the UI can compare it against any subsequent Lospec remap.
+                    if not self._remap_from_active:
+                        snap = get_rebalanced_path(d, sid)
+                        result.save(snap, "PNG")
 
             self.signals.result.emit({"sprite_id": sid, "outputs": outputs})
 

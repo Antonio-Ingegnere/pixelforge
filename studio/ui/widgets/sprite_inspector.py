@@ -62,6 +62,7 @@ class SpriteInspector(QWidget):
     group_changed            = Signal(str, object)
     weight_changed           = Signal(str, float)
     remap_override_changed   = Signal(str, dict)
+    source_color_selected    = Signal(object)   # (r, g, b) tuple or None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -215,6 +216,7 @@ class SpriteInspector(QWidget):
         map_scroll.setFrameShape(QScrollArea.NoFrame)
         self._color_map = ColorMappingWidget()
         self._color_map.override_changed.connect(self._on_override_changed)
+        self._color_map.source_selected.connect(self.source_color_selected)
         map_scroll.setWidget(self._color_map)
         ml.addWidget(map_scroll)
 
@@ -254,6 +256,14 @@ class SpriteInspector(QWidget):
 
     # ── public API ────────────────────────────────────────────────────────────
 
+    def highlight_mapping_color(self, rgb):
+        """Highlight the mapping row whose source colour matches rgb (or clear if None)."""
+        self._color_map.highlight_source_color(rgb)
+
+    def highlight_mapping_target(self, rgb):
+        """Highlight all mapping rows whose target colour matches rgb (or clear if None)."""
+        self._color_map.highlight_target_color(rgb)
+
     def set_sprite(self, project: dict, sprite: dict, groups: List[str]):
         from backends.project_backend import (
             get_active_file, get_original_path, pipeline_status,
@@ -261,6 +271,7 @@ class SpriteInspector(QWidget):
 
         self._sprite  = sprite
         self._project = project
+        self._color_map.highlight_source_color(None)
         self._title.setText(sprite["id"])
         self._title.setObjectName("InspectorTitleActive")
         self._title.style().unpolish(self._title)
@@ -369,6 +380,7 @@ class SpriteInspector(QWidget):
         self._apply_btn.setEnabled(False)
         self._color_map.clear()
         self._mapping_box.setVisible(False)
+        self.source_color_selected.emit(None)
 
     def set_running(self, running: bool):
         self._apply_btn.setEnabled(not running and self._sprite is not None)
@@ -386,7 +398,7 @@ class SpriteInspector(QWidget):
             self._mapping_box.setVisible(False)
             return
 
-        from backends.project_backend import load_palette, get_remap_input
+        from backends.project_backend import load_palette, get_active_file
         from backends.remap import compute_mapping
 
         group   = self._sprite.get("group")
@@ -399,7 +411,9 @@ class SpriteInspector(QWidget):
             return
 
         try:
-            src_path = get_remap_input(self._project, self._sprite)
+            # Use the most-processed file (including remapped if it exists) so the
+            # mapping shows the few rebalanced colors rather than all original colors.
+            src_path = get_active_file(self._project, self._sprite)
             img      = Image.open(src_path).convert("RGBA")
             overrides = pipe.get("remap_palette", {}).get("overrides", {})
             mapping   = compute_mapping(img, palette, overrides)

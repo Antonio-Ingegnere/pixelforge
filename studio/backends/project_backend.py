@@ -163,6 +163,11 @@ def get_remapped_path(project_dir: str, sprite_id: str) -> Path:
     return Path(project_dir) / "processed" / f"{sprite_id}_remapped.png"
 
 
+def get_rebalanced_path(project_dir: str, sprite_id: str) -> Path:
+    """Snapshot saved after a fresh (non-chained) palette remap, for before/after comparison."""
+    return Path(project_dir) / "processed" / f"{sprite_id}_rebalanced.png"
+
+
 def get_remap_input(project: dict, sprite: dict) -> Path:
     """Highest processed file that exists, excluding the remap output itself."""
     d    = project["_dir"]
